@@ -1,0 +1,13 @@
+{
+  "description": "Stop tool calls that reach the customer's ClickHouse, its credentials or the case rooms outside the gate",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Read",
+        "hooks": [
+          { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.py\"" }
+        ]
+      }
+    ]
+  }
+}

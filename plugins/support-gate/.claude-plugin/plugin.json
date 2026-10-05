@@ -1,0 +1,8 @@
+{
+  "name": "support-gate",
+  "version": "0.1.0",
+  "description": "The customer's side of the support agency: your own agent answers a support agent's requests about your ClickHouse, with your yes on each one, and never sends your data.",
+  "author": { "name": "agent-realm" },
+  "license": "UNLICENSED",
+  "keywords": ["clickhouse", "support", "agency", "realm"]
+}

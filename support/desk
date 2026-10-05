@@ -1,0 +1,356 @@
+#!/usr/bin/env python3
+"""desk -- the support member's side of the support agency.
+
+The support member can do two things in a customer's house, and only after that customer
+enrolled it: INSERT a request, and read the answers. Every answer was produced on the customer's
+side, by the customer's own agent running the published SQL, and approved by its human.
+
+  desk clients                          houses that enrolled you (from your own grants)
+  desk tick [--cadence S] [--wait S]   write the heartbeat, then summarize every case; with
+                                        --wait, keep polling every cadence until a case is
+                                        your move or the wait is over
+  desk case <house> <case>              one case in full: the problem, each request, each answer
+  desk open <house> --title TEXT        open a case yourself; prints the case id
+  desk ask <house> <case> <kind> [db=… tbl=… hours=… lim=… qhash=…]
+                                        ask one typed question; prints the request id
+  desk note <house> <case> TEXT         tell the customer something (a diagnosis, a question)
+  desk fix <house> <case> --stmt SQL [--why TEXT]
+                                        propose one fix statement; only the customer can apply it
+  desk close <house> <case> [--why TEXT]
+  desk answers <house> [--case C] [--req R] [--json]
+  desk wait <house> <req_id> [--timeout SECONDS]
+                                        poll until that request is answered, then print the answer
+
+Kinds: server_info, tables_overview, table_schema (db=, tbl=), parts_health,
+slow_queries (hours=, lim=), query_profile (qhash=, hours=), errors. There is no free SQL: the
+customer's own room refuses any other kind, and any fix that is not an allowed form.
+
+Config: $SUPPORT_DESK_CONFIG, default ~/.support-desk/config.json, with realm_url,
+realm_curlrc (a curl config holding your member's credentials) and member.
+"""
+import base64, hashlib, json, os, re, secrets, sys, time, urllib.error, urllib.parse, urllib.request
+
+IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
+ID = re.compile(r"^[A-Za-z0-9_-]{4,64}$")
+KINDS = ("server_info", "tables_overview", "table_schema", "parts_health", "slow_queries",
+         "query_profile", "errors")
+ARGS = {"db": str, "tbl": str, "hours": int, "lim": int, "qhash": int}
+REQ_COLS = ("case_id", "req_id", "kind", "db", "tbl", "hours", "lim", "qhash", "stmt", "text")
+
+
+def die(msg, code=1):
+    print(f"desk: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def load_config():
+    path = os.path.expanduser(os.environ.get("SUPPORT_DESK_CONFIG", "~/.support-desk/config.json"))
+    try:
+        with open(path) as f:
+            cfg = json.load(f)
+    except (OSError, ValueError) as e:
+        die(f"cannot read config {path}: {e}", 3)
+    for k in ("realm_url", "realm_curlrc", "member"):
+        if not cfg.get(k):
+            die(f"config: {k} is missing", 3)
+    return cfg
+
+
+def curlrc_user(path):
+    with open(os.path.expanduser(path)) as f:
+        for line in f:
+            m = re.match(r'\s*user\s*=\s*"([^":]+):(.*)"\s*$', line)
+            if m:
+                return m.group(1), m.group(2).replace('\\"', '"').replace("\\\\", "\\")
+    die(f"no user line in {path}", 3)
+
+
+class Desk:
+    def __init__(self, cfg):
+        self.url = cfg["realm_url"].rstrip("/")
+        self.auth = curlrc_user(cfg["realm_curlrc"])
+        self.member = cfg["member"]
+
+    def q(self, sql, fmt="JSONEachRow", params=None):
+        qs = {"default_format": fmt}
+        qs.update({f"param_{k}": v for k, v in (params or {}).items()})
+        req = urllib.request.Request(self.url + "/?" + urllib.parse.urlencode(qs), data=sql.encode(), method="POST")
+        token = base64.b64encode(f"{self.auth[0]}:{self.auth[1]}".encode()).decode()
+        req.add_header("Authorization", "Basic " + token)
+        req.add_header("User-Agent", "support-desk/0.2")   # a realm behind a CDN may refuse the stdlib's default
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                return r.read().decode()
+        except urllib.error.HTTPError as e:
+            die("the realm refused: " + (e.read().decode(errors="replace").strip().splitlines() or [""])[0][:300])
+        except urllib.error.URLError as e:
+            die(f"the realm is unreachable: {e.reason}")
+
+
+def rows(text):
+    return [json.loads(line) for line in (text or "").splitlines() if line.strip()]
+
+
+def house_arg(h):
+    if not IDENT.match(h):
+        die("a house is a plain name", 3)
+    return h
+
+
+def id_arg(v, what):
+    if not ID.match(v):
+        die(f"a {what} is 4 to 64 letters, digits, - or _", 3)
+    return v
+
+
+def new_id(prefix):
+    return f"{prefix}{time.strftime('%Y%m%d')}-{secrets.token_hex(4)}"
+
+
+def opt(argv, name, default=None):
+    for i, a in enumerate(argv):
+        if a == name and i + 1 < len(argv):
+            return argv[i + 1]
+    return default
+
+
+def put(d, house, case_id, kind, **cols):
+    """One request into the customer's room, and the same row into this member's own log: the
+    support member cannot read the customer's room back."""
+    row = {"case_id": case_id, "req_id": new_id("r"), "kind": kind}
+    row.update(cols)
+    names = ", ".join(k for k in REQ_COLS if k in row)
+    d.q(f"INSERT INTO {house}.support_requests ({names}) FORMAT JSONEachRow\n" + json.dumps(row), fmt="TSV")
+    d.q(f"INSERT INTO {d.member}.sent (house, {names}) FORMAT JSONEachRow\n" + json.dumps(dict(row, house=house)),
+        fmt="TSV")
+    return row["req_id"]
+
+
+def clients(d):
+    grants = d.q(f"SHOW GRANTS FOR {d.member}", fmt="TSV")
+    ins = set(re.findall(r"GRANT [^\n]*\bINSERT\b[^\n]* ON (\w+)\.support_requests TO", grants))
+    sel = set(re.findall(r"GRANT [^\n]*\bSELECT\b[^\n]* ON (\w+)\.support_answers TO", grants))
+    return {h: ("enrolled" if h in ins and h in sel else ("can ask only" if h in ins else "can read only"))
+            for h in sorted(ins | sel)}
+
+
+def fetch(d, house, case_id=None, req_id=None):
+    where, params = [], {}
+    if case_id:
+        where.append("case_id = {c:String}")
+        params["c"] = case_id
+    if req_id:
+        where.append("req_id = {r:String}")
+        params["r"] = req_id
+    out = rows(d.q("SELECT case_id, req_id, toString(at) AS at, author, status, approved_by, payload, payload_sha256 "
+                   f"FROM {house}.support_answers " + ("WHERE " + " AND ".join(where) if where else "")
+                   + " ORDER BY at", params=params))
+    for a in out:
+        # author is stamped by the server, and the house's owner is the only writer
+        a["verified"] = (a["author"] == house and
+                         hashlib.sha256(a["payload"].encode()).hexdigest() == a["payload_sha256"])
+    return out
+
+
+def sent(d, house, case_id=None):
+    where, params = "house = {h:String}", {"h": house}
+    if case_id:
+        where += " AND case_id = {c:String}"
+        params["c"] = case_id
+    return rows(d.q("SELECT house, case_id, req_id, toString(at) AS at, kind, db, tbl, hours, lim, "
+                    f"toString(qhash) AS qhash, stmt, text FROM {d.member}.sent WHERE {where} ORDER BY at",
+                    params=params))
+
+
+def describe(r):
+    k = r["kind"]
+    if k == "table_schema":
+        return f"table_schema {r['db']}.{r['tbl']}"
+    if k == "slow_queries":
+        return f"slow_queries hours={r['hours']} lim={r['lim']}"
+    if k == "query_profile":
+        return f"query_profile qhash={r['qhash']} hours={r['hours']}"
+    if k == "apply":
+        return f"apply: {r['stmt']}"
+    if k in ("note", "close"):
+        return f"{k}: {r['text']}"
+    return k
+
+
+def case_state(answers, requests):
+    """'closed', 'waiting on the customer', or 'your move'."""
+    answered = {a["req_id"] for a in answers}
+    if any(a["status"] == "closed" for a in answers) or \
+       any(r["kind"] == "close" and r["req_id"] in answered for r in requests):
+        return "closed"
+    if any(r["req_id"] not in answered for r in requests):
+        return "waiting on the customer"
+    last_req = max((r["at"] for r in requests), default="")
+    last_ans = max((a["at"] for a in answers), default="")
+    return "your move" if last_ans > last_req else "waiting on the customer"
+
+
+def show_answer(a, as_json):
+    if as_json:
+        print(json.dumps(a))
+        return
+    who = f", approved by {a['approved_by']}" if a["approved_by"] else ""
+    print(f"  answer {a['req_id']}: {a['status']}{who}  {a['at']}" + ("" if a["verified"] else "  UNVERIFIED"))
+    for line in a["payload"].splitlines():
+        print("    " + line)
+
+
+def cmd_clients(d, argv):
+    c = clients(d)
+    for h, state in c.items():
+        print(f"{h}\t{state}")
+    if not c:
+        print("no customer has enrolled you")
+
+
+def tick_once(d, cadence):
+    c = clients(d)
+    lines, open_cases, moves = [], 0, 0
+    for h, state in c.items():
+        if state != "enrolled":
+            lines.append(f"{h}: {state}")
+            continue
+        answers, requests = fetch(d, h), sent(d, h)
+        for case_id in sorted({a["case_id"] for a in answers} | {r["case_id"] for r in requests}):
+            ca = [a for a in answers if a["case_id"] == case_id]
+            st = case_state(ca, [r for r in requests if r["case_id"] == case_id])
+            if st != "closed":
+                open_cases += 1
+                moves += st == "your move"
+                title = next((a["payload"][:100] for a in ca if a["status"] == "opened"), "")
+                lines.append(f"{h} {case_id}: {st}" + (f" -- {title!r}" if title else ""))
+    d.q(f"INSERT INTO {d.member}.heartbeat (cadence_s, open_cases, note) "
+        "VALUES ({cadence:UInt32}, {n:UInt32}, {note:String})", fmt="TSV",
+        params={"cadence": cadence, "n": open_cases, "note": f"the resident polls every {cadence} s"})
+    return c, lines, open_cases, moves
+
+
+def cmd_tick(d, argv):
+    """With --wait, poll every cadence seconds (a heartbeat each time) until some case is your
+    move or the wait is over: the agent wakes only when there is something to do."""
+    cadence = int(opt(argv, "--cadence", "60"))
+    deadline = time.time() + int(opt(argv, "--wait", "0"))
+    while True:
+        c, lines, open_cases, moves = tick_once(d, cadence)
+        if moves or time.time() + cadence > deadline:
+            break
+        time.sleep(cadence)
+    print(f"heartbeat written: cadence {cadence} s, {open_cases} open case(s), {moves} your move, {len(c)} client(s)")
+    for line in lines:
+        print(line)
+
+
+def cmd_case(d, argv):
+    if len(argv) < 2:
+        die("usage: desk case <house> <case>", 3)
+    h, case_id = house_arg(argv[0]), id_arg(argv[1], "case id")
+    answers, requests = fetch(d, h, case_id), sent(d, h, case_id)
+    print(f"case {case_id} in {h}: {case_state(answers, requests)}")
+    asked = {r["req_id"] for r in requests}
+    events = [(a["at"], "a", a) for a in answers if a["req_id"] not in asked]
+    events += [(r["at"], "r", r) for r in requests]
+    for _, kind, x in sorted(events, key=lambda e: e[0]):
+        if kind == "a":
+            print(f"customer {x['status']} ({x['req_id']}, approved by {x['approved_by']}) {x['at']}"
+                  + ("" if x["verified"] else "  UNVERIFIED"))
+            for line in x["payload"].splitlines():
+                print("    " + line)
+            continue
+        print(f"you asked {x['req_id']} {x['at']}: {describe(x)}")
+        if x["kind"] == "apply" and x["text"]:
+            print(f"    why: {x['text']}")
+        mine = [a for a in answers if a["req_id"] == x["req_id"]]
+        if not mine:
+            print("  (not answered yet)")
+        for a in mine:
+            show_answer(a, False)
+
+
+def cmd_open(d, argv):
+    if not argv:
+        die("usage: desk open <house> --title TEXT", 3)
+    case_id = new_id("c")
+    req_id = put(d, house_arg(argv[0]), case_id, "note", text=opt(argv, "--title", "a support case is open"))
+    print(f"case {case_id} (request {req_id})")
+
+
+def cmd_ask(d, argv):
+    if len(argv) < 3:
+        die("usage: desk ask <house> <case> <kind> [db=… tbl=… hours=… lim=… qhash=…]", 3)
+    house, case_id, kind = house_arg(argv[0]), id_arg(argv[1], "case id"), argv[2]
+    if kind not in KINDS:
+        die(f"'{kind}' is not a kind: {', '.join(KINDS)}", 3)
+    cols = {}
+    for kv in argv[3:]:
+        k, _, v = kv.partition("=")
+        if k not in ARGS:
+            die(f"'{k}' is not an argument: {', '.join(ARGS)}", 3)
+        try:
+            cols[k] = ARGS[k](v)
+        except ValueError:
+            die(f"{k} must be a number", 3)
+    print(put(d, house, case_id, kind, **cols))
+
+
+def cmd_note(d, argv):
+    if len(argv) < 3:
+        die("usage: desk note <house> <case> TEXT", 3)
+    print(put(d, house_arg(argv[0]), id_arg(argv[1], "case id"), "note", text=" ".join(argv[2:])))
+
+
+def cmd_fix(d, argv):
+    stmt = opt(argv, "--stmt")
+    if len(argv) < 2 or not stmt:
+        die("usage: desk fix <house> <case> --stmt SQL [--why TEXT]", 3)
+    print(put(d, house_arg(argv[0]), id_arg(argv[1], "case id"), "apply", stmt=stmt, text=opt(argv, "--why", "")))
+
+
+def cmd_close(d, argv):
+    if len(argv) < 2:
+        die("usage: desk close <house> <case> [--why TEXT]", 3)
+    print(put(d, house_arg(argv[0]), id_arg(argv[1], "case id"), "close", text=opt(argv, "--why", "")))
+
+
+def cmd_answers(d, argv):
+    if not argv:
+        die("usage: desk answers <house> [--case C] [--req R] [--json]", 3)
+    out = fetch(d, house_arg(argv[0]), opt(argv, "--case"), opt(argv, "--req"))
+    if not out and "--json" not in argv:
+        print("no answers yet")
+    for a in out:
+        show_answer(a, "--json" in argv)
+
+
+def cmd_wait(d, argv):
+    if len(argv) < 2:
+        die("usage: desk wait <house> <req_id> [--timeout SECONDS]", 3)
+    house, req_id = house_arg(argv[0]), id_arg(argv[1], "request id")
+    deadline = time.time() + int(opt(argv, "--timeout", "600"))
+    while True:
+        out = fetch(d, house, req_id=req_id)
+        if out:
+            show_answer(out[-1], "--json" in argv)
+            return
+        if time.time() > deadline:
+            die(f"no answer to {req_id} yet", 2)
+        time.sleep(3)
+
+
+def main():
+    if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help", "help"):
+        print(__doc__)
+        return
+    cmds = {"clients": cmd_clients, "tick": cmd_tick, "case": cmd_case, "open": cmd_open, "ask": cmd_ask,
+            "note": cmd_note, "fix": cmd_fix, "close": cmd_close, "answers": cmd_answers, "wait": cmd_wait}
+    if sys.argv[1] not in cmds:
+        die(f"unknown command {sys.argv[1]}", 3)
+    cmds[sys.argv[1]](Desk(load_config()), sys.argv[2:])
+
+
+if __name__ == "__main__":
+    main()

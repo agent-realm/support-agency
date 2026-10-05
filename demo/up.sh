@@ -10,8 +10,8 @@
 # by user_id, so every lookup reads the whole table.
 #
 # The canary: a random string that the customer holds and the realm must never see. It sits
-# in rows of two user tables, and in the literals of three customer queries: one EXPLAIN can
-# show, one that scans, and one that fails, so it reaches an error message too.
+# in rows of two user tables, and in the literals of three customer queries: a lookup by
+# e-mail address, one that scans, and one that fails, so it reaches an error message too.
 set -euo pipefail
 : "${WORK:?WORK must name a private scratch directory}"
 here=$(cd "$(dirname "$0")" && pwd)
@@ -24,7 +24,7 @@ admin_pw=$(openssl rand -hex 16); gate_pw=$(openssl rand -hex 16)
 sed -e "s/__ADMIN_SHA256__/$(sha "$admin_pw")/" -e "s/__GATE_SHA256__/$(sha "$gate_pw")/" \
   "$here/customer.yml" > "$WORK/customer.yml"
 printf 'user = "customer:%s"\n' "$admin_pw" > "$WORK/local-admin.curlrc"
-printf 'user = "gate:%s"\n' "$gate_pw" > "$WORK/local-gate.curlrc"
+printf 'user = "support_gate:%s"\n' "$gate_pw" > "$WORK/local-gate.curlrc"
 unset admin_pw gate_pw
 
 lab up "$name" --compose "$WORK/customer.yml"

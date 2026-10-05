@@ -11,24 +11,27 @@ because the canon cites kernel specifications, and kernel material stays out of 
 | Term | Here |
 |---|---|
 | **agency** | the support agency: what a customer and a support team install on a realm |
-| **house** | the customer member's house, which holds the case rooms. The support member's house is unused. |
-| **room** | `support_requests` and `support_answers`, the case rooms |
+| **house** | the customer member's house, which holds the case rooms; the support member's house, which holds the published protocol and the heartbeat |
+| **room** | the case rooms (`support_requests`, `support_answers`, `support_kinds`) and the support member's rooms (`protocol`, `kinds`, `statements`, `heartbeat`, `sent`) |
 | **member** | the customer's member, and the support member (machine register: principals) |
-| **resident** | the customer's gate and the support desk. Both are `kind = "agent"`, `on = "loop"`, and run off-realm on their owners' machines. |
-| **operator** | the realm's operator. The agency needs nothing from them (an optional lobby directory row aside). |
+| **resident** | the customer's agent and the resident support agent. Both are `kind = "agent"`, `on = "loop"`, and run off-realm on their owners' machines. |
+| **operator** | the realm's operator. The agency needs nothing from them but the optional lobby directory row. |
 
 Local words:
 
 | Word | Meaning |
 |---|---|
-| **gate** | the customer's agent, with the `support-gate` plugin: the only bridge between the customer's ClickHouse and the realm |
-| **desk** | the support agent, with the `support-desk` plugin |
-| **case** | one support matter. It is opened by an `open` request, and every request carries its `case_id`. |
-| **request** | a row in `support_requests`. It always has a kind; there is no free SQL. |
-| **answer** | a row in `support_answers`, with a status: acknowledged, answered, applied, failed, denied or refused |
-| **enroll / end** | the customer granting, and revoking, the support member's two grants |
-| **preview** | the exact answer the gate would send, stored locally and shown to the human before a yes |
+| **gate** | the customer's agent, following the protocol: the only bridge between the customer's ClickHouse and the realm. `support_gate` is the support-only account the protocol recommends on the customer's ClickHouse. |
+| **desk** | `support/desk`, the support member's tool |
+| **the resident** | the Claude Code session that runs as the support member and works every case |
+| **protocol** | the guide, kinds and statements the support member publishes in its house; the customer's side is nothing else |
+| **kind** | a request kind: a closed list, each with fixed published SQL |
+| **case** | one support matter. The customer opens it with a problem statement (answer `open`, status `opened`), or support with a note; every row carries its `case_id`. |
+| **request** | a row in `support_requests`. It always has a kind and typed arguments; there is no free SQL. |
+| **answer** | a row in `support_answers`, with a status: opened, acknowledged, answered, applied, failed, denied, refused or closed |
+| **enroll / end** | the customer creating its case rooms and granting, and revoking, the support member's two grants |
+| **the file** | the exact answer the customer's agent would send, shown to the human with its sha256 before a yes; the server computes `payload_sha256` from what arrived |
 | **canary** | a random string the test plants in the demo customer's data and queries. It must never appear in the realm. |
 
-The public register applies to the README's top half and to the plugin descriptions: realm,
+The public register applies to the README's top half and to the protocol's guide: realm,
 town, agency, join, deploy, hosted.

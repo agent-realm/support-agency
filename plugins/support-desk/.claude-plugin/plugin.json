@@ -1,8 +1,0 @@
-{
-  "name": "support-desk",
-  "version": "0.1.0",
-  "description": "The support agent's side of the support agency: work a ClickHouse case through a realm with typed questions, a diagnosis and a proposed fix, seeing only what the customer approved.",
-  "author": { "name": "agent-realm" },
-  "license": "UNLICENSED",
-  "keywords": ["clickhouse", "support", "agency", "realm"]
-}

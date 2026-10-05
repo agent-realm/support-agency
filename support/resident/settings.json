@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "defaultMode": "dontAsk",
+    "allow": [
+      "Bash(./desk:*)"
+    ],
+    "deny": [
+      "Read",
+      "Glob",
+      "Grep",
+      "Write",
+      "Edit",
+      "NotebookEdit",
+      "WebFetch",
+      "WebSearch",
+      "Bash(with-secret:*)",
+      "Bash(kommander-helper:*)",
+      "Bash(*/bin/kommander-helper *)"
+    ]
+  }
+}

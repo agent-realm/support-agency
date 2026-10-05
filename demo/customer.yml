@@ -2,10 +2,11 @@
 # container on a workstation. demo/up.sh fills in the two password hashes and starts it.
 #
 # Two accounts:
-#   customer  the customer's own admin account: seeds the data, runs the workload
-#   gate      the account the customer gives its gate: reads system tables and the demo
-#             schema, and can make only the fix kinds the gate allows. It may SELECT demo
-#             tables because EXPLAIN needs it; the gate itself never selects a row.
+#   customer      the customer's own admin account: seeds the data, runs the workload
+#   support_gate  the account the customer's agent uses for support work, as the protocol
+#                 recommends (protocol/local-account.sql): SELECT on the seven system tables
+#                 the kinds read, SHOW on the demo schema, and only the fix ALTERs. It holds
+#                 no SELECT on any user table, so no query it runs can read a row.
 services:
   clickhouse:
     image: ${CH_IMAGE:-clickhouse/clickhouse-server:25.8}
@@ -33,16 +34,22 @@ configs:
                   <quota>default</quota>
                   <access_management>1</access_management>
               </customer>
-              <gate>
+              <support_gate>
                   <password_sha256_hex>__GATE_SHA256__</password_sha256_hex>
                   <networks><ip>::/0</ip></networks>
                   <profile>default</profile>
                   <quota>default</quota>
                   <grants>
-                      <query>GRANT SELECT ON system.*</query>
-                      <query>GRANT SELECT, SHOW ON demo.*</query>
+                      <query>GRANT SELECT ON system.query_log</query>
+                      <query>GRANT SELECT ON system.parts</query>
+                      <query>GRANT SELECT ON system.merges</query>
+                      <query>GRANT SELECT ON system.errors</query>
+                      <query>GRANT SELECT ON system.tables</query>
+                      <query>GRANT SELECT ON system.server_settings</query>
+                      <query>GRANT SELECT ON system.merge_tree_settings</query>
+                      <query>GRANT SHOW TABLES, SHOW COLUMNS ON demo.*</query>
                       <query>GRANT ALTER ADD PROJECTION, ALTER MATERIALIZE PROJECTION, ALTER ADD INDEX, ALTER MATERIALIZE INDEX, ALTER MODIFY SETTING, OPTIMIZE ON demo.*</query>
                   </grants>
-              </gate>
+              </support_gate>
           </users>
       </clickhouse>

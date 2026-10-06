@@ -154,11 +154,11 @@ SQL from a request.
 | `note`, `close` | `text` | nothing | `acknowledged` |
 | `server_info` | -- | `version()`, `uptime()`, changed server and MergeTree settings | the same; a value only if it is a plain number or `true`/`false` |
 | `tables_overview` | -- | `system.parts` aggregates | rows, bytes, part and partition counts per table; no partition values |
-| `table_schema` | `db`, `tbl` | `system.tables` | keys, engine, and the CREATE statement with every quoted string replaced by `'?'` |
+| `table_schema` | `db`, `tbl` | `system.tables` | keys, engine, and the CREATE statement with every quoted string replaced by `'?'`; numbers stay (types, settings, numeric defaults) |
 | `parts_health` | -- | `system.parts`, `system.merges` aggregates | parts per partition, active parts, merges running |
-| `slow_queries` | `hours`, `lim` | `system.query_log` per `normalized_query_hash` | `normalizeQuery` shapes with any remaining quoted string or number replaced by `?`; runs, p50/max ms, rows, bytes, memory |
+| `slow_queries` | `hours`, `lim` | `system.query_log` per `normalized_query_hash` | `normalizeQuery` shapes, then anything quoted, UUIDs, hex and numbers replaced by `?`; runs, p50/max ms, rows, bytes, memory |
 | `query_profile` | `qhash`, `hours` | `system.query_log` for that hash | tables, projections used, parts/marks/ranges selected against the total, rows read and returned |
-| `errors` | -- | `system.errors` | name, code, count, time; the message with quoted strings, quoted identifiers and numbers replaced by `?`, cut to 200 characters |
+| `errors` | -- | `system.errors` | name, code, count, time; the message with everything from its first quote to its last, backticked names, UUIDs, hex and numbers replaced by `?`, cut to 200 characters |
 | `apply` | `stmt`, `text` | on a yes, the statement | `applied`, or `failed` with the error code |
 
 Allowed fix forms, matched in full by the room's constraint (case-insensitive; plain
@@ -215,12 +215,13 @@ the gate, instructed by the protocol, and its human decides.
 | only allowed fix forms | `gate` regexes | the room's `CHECK` constraint on `stmt` (469) | **ClickHouse** |
 | request author | stamped, and checked by `gate` | stamped (`MATERIALIZED`, 44 on forgery); the agent checks it | **ClickHouse** + protocol |
 | no row of a user table is read | `gate` read only `system.*` | the recommended `support_gate` account holds no SELECT on any user table (497) | **ClickHouse**, if the customer uses that account; otherwise the published SQL |
-| no SQL from support's rows | `gate` had no path from text to SQL | the agent runs only its own copy of the kind's SQL, with typed parameters | protocol + ClickHouse (query parameters are typed, never spliced) |
+| no SQL from support's rows, for diagnostics | `gate` had no path from text to SQL | the agent runs only its own copy of the kind's SQL, with typed parameters | protocol + ClickHouse (query parameters are typed, never spliced) |
+| a fix is support's SQL, bounded | `gate` regexes on the fix | `apply` runs the row's `stmt` itself: support's text, which only the room's constraint (one allowed form) and the human's yes stand between | **ClickHouse** (the form) + **human** (the yes) |
 | support cannot change the SQL | the SQL was code in the plugin | the customer's frozen copy; support holds no grant on it (497) | **ClickHouse** |
 | literal redaction | Python regexes | `normalizeQuery` and `replaceRegexpAll` inside the fixed SQL | **ClickHouse** (the SQL is fixed) |
 | echo screen against the customer's own query literals | `gate` | **dropped**; the human reads the answer, and the protocol tells the agent to flag anything that looks like data | **human** |
 | deny patterns (e-mail addresses) | `gate` config | **dropped**; same as above | **human** |
-| preview equals send | sha256 of a stored preview | the human sees the file and its sha256; `payload_sha256` is computed by the server from what arrived | **ClickHouse** + human |
+| preview equals send | sha256 of a stored preview; `gate` refused to send anything else | the human sees the file and its sha256, and the agent sends that file. `payload_sha256` is computed by the server from what arrived, so the agent and support can check it afterwards; nothing refuses a different file beforehand | **human** + protocol; ClickHouse only records the digest |
 | refusals and denials carry nothing | `gate` (Codex found it did not) | the answers room refuses a payload on `denied`/`refused`, and anything but a code on `failed` (469) | **ClickHouse** |
 | approver is a name | free text (Codex found it could carry data) | `CHECK`: letters and `. ' -` only, 64 at most | **ClickHouse** |
 | one yes per send | `gate send --yes` and a permission prompt | the protocol; the agent's own permission prompts, if its human keeps them on | **human** + protocol |
@@ -270,6 +271,8 @@ exfiltrate the customer's data through the realm, or to change the customer's da
 - **A customer that skips the local account** gets the published SQL and the human, not
   ClickHouse's grants, between support and its rows.
 - **Identifiers leave by design.** Some schemas are themselves sensitive.
+- **Numbers in a CREATE statement leave.** `table_schema` redacts quoted strings only, so a numeric `DEFAULT` constant reaches support. Redacting every number would also erase types (`Decimal(18, 2)`) and settings.
+- **Redaction is regular expressions.** Quotes are redacted greedily, first to last, so an unpaired apostrophe cannot expose a literal; an unquoted, non-numeric value in a message (a bare word that came from a row) still passes. The human reading the answer is the backstop.
 - **The enroll statements come from the support member's house.** The customer's agent runs
   them; the protocol has it show them first, and they can be checked against the public repo.
   A member holds rights only on its own house, which bounds what they could do.
@@ -286,7 +289,9 @@ claim (`support/resident/join.sh`); its credential stays in `~/.<prefix>/support
 
 - **Its only tool is `./desk`.** Claude Code runs in safe mode (no CLAUDE.md, hooks, skills or
   plugins of the host), in `dontAsk` mode with one allow rule, `Bash(./desk:*)`, and denies for
-  file reads, writes, web and the host's other allow rules. A customer's words reach it as data;
+  file reads, writes and web. The config dir it runs under (for its login) merges its own allow
+  rules: `start.sh` refuses to start while that config allows anything `settings.json` does not
+  deny. A customer's words reach it as data;
   if they talk it into something, the most it can do is run `desk`, and `desk` can only write
   requests that the customer's room then checks.
 - **Its cadence:** `/loop 10m` runs a tick; each tick runs `desk tick --cadence 60 --wait 590`,

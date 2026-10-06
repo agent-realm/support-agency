@@ -1,8 +1,9 @@
 -- kind: slow_queries
 -- args: hours (1-168), lim (1-20)
--- sends: per query shape (normalizeQuery, then every quoted string and number replaced by ?): runs, p50 and max ms, average rows and bytes read, memory
+-- sends: per query shape (normalizeQuery, then anything quoted, UUIDs, hex and numbers replaced by ?): runs, p50 and max ms, average rows and bytes read, memory
 SELECT toString(normalized_query_hash) AS qhash,
-       replaceRegexpAll(normalizeQuery(any(query)), $$'(?:[^'\\]|\\.)*'|\b[0-9]+(?:\.[0-9]+)?\b$$, '?') AS query_shape,
+       replaceRegexpAll(normalizeQuery(any(query)),
+           $$(?s)'.*'|".*"|\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b|\b0x[0-9A-Fa-f]+\b|\b[0-9]+(?:\.[0-9]+)?\b$$, '?') AS query_shape,
        count() AS runs,
        round(quantile(0.5)(query_duration_ms)) AS p50_ms,
        max(query_duration_ms) AS max_ms,

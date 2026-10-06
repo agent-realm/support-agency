@@ -27,5 +27,22 @@ printf '{"realm_url": "%s", "realm_curlrc": "%s", "member": "%s_support"}\n' "$R
 cd "$run"
 export SUPPORT_DESK_CONFIG="$run/desk.json"
 export CLAUDE_CONFIG_DIR="${RESIDENT_CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+# The config dir's allow rules merge with ours. Refuse to start if it allows anything that
+# settings.json does not deny: the resident must be able to run ./desk and nothing else.
+python3 - "$CLAUDE_CONFIG_DIR" "$run/settings.json" <<'PY' || exit 1
+import json, os, sys
+cfg, ours = sys.argv[1], json.load(open(sys.argv[2]))["permissions"]
+denied = set(ours["deny"]) | set(ours["allow"])
+extra = []
+for f in ("settings.json", "settings.local.json"):
+    try:
+        allow = json.load(open(os.path.join(cfg, f))).get("permissions", {}).get("allow", [])
+    except (OSError, ValueError):
+        continue
+    extra += [f"{f}: {r}" for r in allow if r not in denied]
+if extra:
+    print("start: the config dir allows more than ./desk; deny these in settings.json first:", *extra, sep="\n  ", file=sys.stderr)
+    sys.exit(1)
+PY
 exec claude --safe-mode --model "${RESIDENT_MODEL:-claude-sonnet-5-5}" --settings "$run/settings.json" --permission-mode dontAsk \
   --append-system-prompt-file "$run/RESIDENT.md" "${@:2}"

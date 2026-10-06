@@ -15,7 +15,8 @@
       "WebSearch",
       "Bash(with-secret:*)",
       "Bash(kommander-helper:*)",
-      "Bash(*/bin/kommander-helper *)"
+      "Bash(*/bin/kommander-helper *)",
+      "Bash(kommander-helper *)"
     ]
   }
 }

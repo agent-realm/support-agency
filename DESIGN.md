@@ -289,7 +289,7 @@ claim (`support/resident/join.sh`); its credential stays in `~/.<prefix>/support
   file reads, writes, web and the host's other allow rules. A customer's words reach it as data;
   if they talk it into something, the most it can do is run `desk`, and `desk` can only write
   requests that the customer's room then checks.
-- **Its cadence:** `/loop 10m` runs a tick; each tick runs `desk tick --cadence 60 --wait 540`,
+- **Its cadence:** `/loop 10m` runs a tick; each tick runs `desk tick --cadence 60 --wait 590`,
   which polls every 60 seconds, writes a heartbeat row each time, and wakes the model only when
   a case is its move. So the house says "polls every 60 s", customers wait at most about a
   minute, and an idle hour costs six short model turns. `/loop` jobs expire after 7 days: the

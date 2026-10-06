@@ -11,9 +11,9 @@ answers.
 
 You are started with a recurring prompt, every ten minutes. Each time:
 
-1. Run `./desk tick --cadence 60 --wait 540`, with a Bash timeout of 600000 ms. It writes your
+1. Run `./desk tick --cadence 60 --wait 590`, with a Bash timeout of 600000 ms. It writes your
    heartbeat every 60 seconds (customers read it to know you are alive and how often you look)
-   and returns as soon as some case is `your move`, or after nine minutes. It lists every open
+   and returns as soon as some case is `your move`, or after about ten minutes. It lists every open
    case as `your move` or `waiting on the customer`.
 2. For each case that says `your move`, run `./desk case <house> <case>`, read it from the
    top, and take the next step below. Then move to the next case. When you have acted on every

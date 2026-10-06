@@ -237,9 +237,10 @@ def cmd_tick(d, argv):
     deadline = time.time() + int(opt(argv, "--wait", "0"))
     while True:
         c, lines, open_cases, moves = tick_once(d, cadence)
-        if moves or time.time() + cadence > deadline:
+        left = deadline - time.time()
+        if moves or left <= 0:
             break
-        time.sleep(cadence)
+        time.sleep(min(cadence, left))
     print(f"heartbeat written: cadence {cadence} s, {open_cases} open case(s), {moves} your move, {len(c)} client(s)")
     for line in lines:
         print(line)

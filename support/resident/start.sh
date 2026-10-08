@@ -52,7 +52,8 @@ path = os.path.join(cfg, ".claude.json")
 if os.path.exists(path):
     for proj, p in load(path).get("projects", {}).items():
         if os.path.realpath(proj) == run:
-            extra += [f"{path} ({proj}): {r}" for r in p.get("allowedTools", []) if r not in denied]
+            rules = p.get("allowedTools", []) + p.get("approvedTools", [])
+            extra += [f"{path} ({proj}): {r}" for r in rules if r not in denied]
 if extra:
     print("start: Claude Code would allow more than ./desk here; deny or remove these first:", *extra, sep="\n  ", file=sys.stderr)
     sys.exit(1)

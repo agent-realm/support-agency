@@ -156,7 +156,7 @@ SQL from a request.
 | `tables_overview` | -- | `system.parts` aggregates | rows, bytes, part and partition counts per table; no partition values |
 | `table_schema` | `db`, `tbl` | `system.tables` | keys, engine, and the CREATE statement with every quoted string replaced by `'?'`; numbers stay (types, settings, numeric defaults) |
 | `parts_health` | -- | `system.parts`, `system.merges` aggregates | parts per partition, active parts, merges running |
-| `slow_queries` | `hours`, `lim` | `system.query_log` per `normalized_query_hash` | `normalizeQuery` shapes (it replaces every literal, heredocs included), cut at any `'` or `$` left over, with IPv6 addresses, UUIDs, hex and numbers replaced by `?`; backticked and double-quoted identifiers stay; runs, p50/max ms, rows, bytes, memory |
+| `slow_queries` | `hours`, `lim` | `system.query_log` per `normalized_query_hash` | `normalizeQuery` shapes (it replaces every literal, heredocs included), cut at any `'` or `$` left over, with UUIDs, hex and numbers replaced by `?`; backticked and double-quoted identifiers stay; runs, p50/max ms, rows, bytes, memory |
 | `query_profile` | `qhash`, `hours` | `system.query_log` for that hash | tables, projections used, parts/marks/ranges selected against the total, rows read and returned |
 | `errors` | -- | `system.errors` | name, code, count, time; the message cut at its first quote of any kind (`'`, `"`, backtick) or `$`, with IPv6 addresses, UUIDs, hex and numbers replaced by `?`, at most 200 characters |
 | `apply` | `stmt`, `text` | on a yes, the statement | `applied`, or `failed` with the error code |

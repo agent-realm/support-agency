@@ -1,12 +1,12 @@
 -- kind: slow_queries
 -- args: hours (1-168), lim (1-20)
--- sends: per query shape (normalizeQuery, then cut at any remaining ' or $, with IPv6 addresses, UUIDs, hex and numbers replaced by ?): runs, p50 and max ms, average rows and bytes read, memory
+-- sends: per query shape (normalizeQuery, then cut at any remaining ' or $, with UUIDs, hex and numbers replaced by ?): runs, p50 and max ms, average rows and bytes read, memory
 SELECT toString(normalized_query_hash) AS qhash,
        replaceRegexpAll(normalizeQuery(any(query)),
            -- normalizeQuery already replaced the literals, heredocs included; a single quote or
            -- $ left over is unexplained, so the shape is cut there. Backticks and double quotes
            -- are identifiers in ClickHouse and stay.
-           $$(?s)['$].*|\b[0-9A-Fa-f]{0,4}(?::[0-9A-Fa-f]{0,4}){2,7}\b|\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b|\b0[xX][0-9A-Fa-f]+\b|\b[0-9]+(?:\.[0-9]+)?\b$$, '?') AS query_shape,
+           $$(?s)['$].*|\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b|\b0[xX][0-9A-Fa-f]+\b|\b[0-9]+(?:\.[0-9]+)?\b$$, '?') AS query_shape,
        count() AS runs,
        round(quantile(0.5)(query_duration_ms)) AS p50_ms,
        max(query_duration_ms) AS max_ms,

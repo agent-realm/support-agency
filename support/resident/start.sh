@@ -29,23 +29,32 @@ export SUPPORT_DESK_CONFIG="$run/desk.json"
 export CLAUDE_CONFIG_DIR="${RESIDENT_CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 # The config dir's allow rules merge with ours. Refuse to start if it allows anything that
 # settings.json does not deny: the resident must be able to run ./desk and nothing else.
-python3 - "$CLAUDE_CONFIG_DIR" "$run/settings.json" <<'PY' || exit 1
+python3 - "$CLAUDE_CONFIG_DIR" "$run" "$run/settings.json" <<'PY' || exit 1
 import json, os, sys
-cfg, ours = sys.argv[1], json.load(open(sys.argv[2]))["permissions"]
+cfg, run, ours = sys.argv[1], os.path.realpath(sys.argv[2]), json.load(open(sys.argv[3]))["permissions"]
 denied = set(ours["deny"]) | set(ours["allow"])
 extra = []
-for f in ("settings.json", "settings.local.json"):
-    path = os.path.join(cfg, f)
-    if not os.path.exists(path):
-        continue
+def load(path):
     try:   # fail closed: a file this cannot read may still grant something to Claude Code
-        allow = json.load(open(path)).get("permissions", {}).get("allow", [])
+        return json.load(open(path))
     except Exception as e:
         print(f"start: cannot check {path} ({e}); refusing to start", file=sys.stderr)
         sys.exit(1)
-    extra += [f"{f}: {r}" for r in allow if r not in denied]
+# every settings file Claude Code may merge for this run: the config dir's, and the run dir's
+for path in (os.path.join(cfg, "settings.json"), os.path.join(cfg, "settings.local.json"),
+             os.path.join(run, ".claude", "settings.json"), os.path.join(run, ".claude", "settings.local.json")):
+    if os.path.exists(path):
+        d = load(path)
+        rules = d.get("permissions", {}).get("allow", []) + d.get("allowedTools", [])
+        extra += [f"{path}: {r}" for r in rules if r not in denied]
+# approvals remembered per project in the config dir's .claude.json
+path = os.path.join(cfg, ".claude.json")
+if os.path.exists(path):
+    for proj, p in load(path).get("projects", {}).items():
+        if os.path.realpath(proj) == run:
+            extra += [f"{path} ({proj}): {r}" for r in p.get("allowedTools", []) if r not in denied]
 if extra:
-    print("start: the config dir allows more than ./desk; deny these in settings.json first:", *extra, sep="\n  ", file=sys.stderr)
+    print("start: Claude Code would allow more than ./desk here; deny or remove these first:", *extra, sep="\n  ", file=sys.stderr)
     sys.exit(1)
 PY
 exec claude --safe-mode --model "${RESIDENT_MODEL:-claude-sonnet-5-5}" --settings "$run/settings.json" --permission-mode dontAsk \

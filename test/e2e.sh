@@ -211,8 +211,8 @@ expect_eq "E2 support sees that the lookup selects most marks of the table" \
 
 r=$("$DESK" ask "$H" "$CASE" errors)
 answer "$r" >/dev/null
-expect_match "E2 errors are answered, the parse error's literal replaced" \
-  "$(desk_answer "$r" | field '[json.loads(l)["message"] for l in a["payload"].splitlines() if json.loads(l)["name"] == "CANNOT_PARSE_TEXT"][0]')" "^Cannot parse string \? as UInt64"
+expect_match "E2 errors are answered, the parse error cut at its literal" \
+  "$(desk_answer "$r" | field '[json.loads(l)["message"] for l in a["payload"].splitlines() if json.loads(l)["name"] == "CANNOT_PARSE_TEXT"][0]')" "^Cannot parse string \?$"
 
 for k in server_info tables_overview parts_health; do
   r=$("$DESK" ask "$H" "$CASE" "$k"); answer "$r" >/dev/null

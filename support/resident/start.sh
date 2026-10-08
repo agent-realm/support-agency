@@ -35,14 +35,18 @@ cfg, ours = sys.argv[1], json.load(open(sys.argv[2]))["permissions"]
 denied = set(ours["deny"]) | set(ours["allow"])
 extra = []
 for f in ("settings.json", "settings.local.json"):
-    try:
-        allow = json.load(open(os.path.join(cfg, f))).get("permissions", {}).get("allow", [])
-    except (OSError, ValueError):
+    path = os.path.join(cfg, f)
+    if not os.path.exists(path):
         continue
+    try:   # fail closed: a file this cannot read may still grant something to Claude Code
+        allow = json.load(open(path)).get("permissions", {}).get("allow", [])
+    except Exception as e:
+        print(f"start: cannot check {path} ({e}); refusing to start", file=sys.stderr)
+        sys.exit(1)
     extra += [f"{f}: {r}" for r in allow if r not in denied]
 if extra:
     print("start: the config dir allows more than ./desk; deny these in settings.json first:", *extra, sep="\n  ", file=sys.stderr)
     sys.exit(1)
 PY
 exec claude --safe-mode --model "${RESIDENT_MODEL:-claude-sonnet-5-5}" --settings "$run/settings.json" --permission-mode dontAsk \
-  --append-system-prompt-file "$run/RESIDENT.md" "${@:2}"
+  --append-system-prompt-file "$run/RESIDENT.md"

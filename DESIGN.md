@@ -156,9 +156,9 @@ SQL from a request.
 | `tables_overview` | -- | `system.parts` aggregates | rows, bytes, part and partition counts per table; no partition values |
 | `table_schema` | `db`, `tbl` | `system.tables` | keys, engine, and the CREATE statement with every quoted string replaced by `'?'`; numbers stay (types, settings, numeric defaults) |
 | `parts_health` | -- | `system.parts`, `system.merges` aggregates | parts per partition, active parts, merges running |
-| `slow_queries` | `hours`, `lim` | `system.query_log` per `normalized_query_hash` | `normalizeQuery` shapes, then anything quoted, UUIDs, hex and numbers replaced by `?`; runs, p50/max ms, rows, bytes, memory |
+| `slow_queries` | `hours`, `lim` | `system.query_log` per `normalized_query_hash` | `normalizeQuery` shapes, cut at any quote left over, with UUIDs, hex and numbers replaced by `?`; runs, p50/max ms, rows, bytes, memory |
 | `query_profile` | `qhash`, `hours` | `system.query_log` for that hash | tables, projections used, parts/marks/ranges selected against the total, rows read and returned |
-| `errors` | -- | `system.errors` | name, code, count, time; the message with everything from its first quote to its last, backticked names, UUIDs, hex and numbers replaced by `?`, cut to 200 characters |
+| `errors` | -- | `system.errors` | name, code, count, time; the message cut at its first `'` or `"`, with backticked names, UUIDs, hex and numbers replaced by `?`, at most 200 characters |
 | `apply` | `stmt`, `text` | on a yes, the statement | `applied`, or `failed` with the error code |
 
 Allowed fix forms, matched in full by the room's constraint (case-insensitive; plain
@@ -272,7 +272,7 @@ exfiltrate the customer's data through the realm, or to change the customer's da
   ClickHouse's grants, between support and its rows.
 - **Identifiers leave by design.** Some schemas are themselves sensitive.
 - **Numbers in a CREATE statement leave.** `table_schema` redacts quoted strings only, so a numeric `DEFAULT` constant reaches support. Redacting every number would also erase types (`Decimal(18, 2)`) and settings.
-- **Redaction is regular expressions.** Quotes are redacted greedily, first to last, so an unpaired apostrophe cannot expose a literal; an unquoted, non-numeric value in a message (a bare word that came from a row) still passes. The human reading the answer is the backstop.
+- **Redaction is regular expressions.** A quote cannot be trusted to pair (an apostrophe, a literal cut short), so error messages, and query shapes with a quote left over, are cut at the first `'` or `"`: nothing after it leaves, at the price of the rest of the message. An unquoted, non-numeric value before the first quote (a bare word that came from a row) still passes; the human reading the answer is the backstop.
 - **The enroll statements come from the support member's house.** The customer's agent runs
   them; the protocol has it show them first, and they can be checked against the public repo.
   A member holds rights only on its own house, which bounds what they could do.
@@ -291,7 +291,7 @@ claim (`support/resident/join.sh`); its credential stays in `~/.<prefix>/support
   plugins of the host), in `dontAsk` mode with one allow rule, `Bash(./desk:*)`, and denies for
   file reads, writes and web. The config dir it runs under (for its login) merges its own allow
   rules: `start.sh` refuses to start while that config allows anything `settings.json` does not
-  deny. A customer's words reach it as data;
+  deny, or holds a settings file it cannot parse, and passes no extra arguments to Claude Code. A customer's words reach it as data;
   if they talk it into something, the most it can do is run `desk`, and `desk` can only write
   requests that the customer's room then checks.
 - **Its cadence:** `/loop 10m` runs a tick; each tick runs `desk tick --cadence 60 --wait 590`,

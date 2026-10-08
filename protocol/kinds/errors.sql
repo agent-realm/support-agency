@@ -5,7 +5,7 @@ SELECT name, code, value AS count, toString(last_error_time) AS last_error_time,
        -- a quote may be unpaired (it's, a literal cut short, a heredoc), so pairing cannot be
        -- trusted: everything from the first quote of any kind, or $, to the end goes
        left(replaceRegexpAll(last_error_message,
-            $$(?s)['"`$].*|(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{0,4}|\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b|\b0[xX][0-9A-Fa-f]+\b|\b[0-9]+(?:\.[0-9]+)?\b$$, '?'),
+            $$(?s)['"`$].*|\B::(?:[0-9A-Fa-f]{1,4}:)*[0-9A-Fa-f]{1,4}\b|\b[0-9A-Fa-f]{1,4}(?::[0-9A-Fa-f]{1,4})*::\B|\b[0-9A-Fa-f]{1,4}(?::[0-9A-Fa-f]{0,4}){1,6}:[0-9A-Fa-f]{1,4}\b|\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b|\b0[xX][0-9A-Fa-f]+\b|\b[0-9]+(?:\.[0-9]+)?\b$$, '?'),
             200) AS message
 FROM system.errors
 WHERE value > 0

@@ -1,0 +1,113 @@
+#!/usr/bin/env python3
+"""publish -- put the support agency's protocol into the support member's house.
+
+  publish [--commit SHA]
+
+Creates the support member's rooms (support/rooms.sql), opens four of them to every member, and
+replaces their contents with what is in protocol/: the guide (protocol/GUIDE.md, one row per
+"## " section), the kinds (protocol/kinds/*.sql, verbatim) and the customer's statements
+(protocol/enroll.sql and protocol/local-account.sql). <support> is replaced by the member's
+name, <prefix> by the realm's prefix and <realm> by its URL; <house>, <handle>, <case> and <db>
+are left for the customer.
+
+--commit names the public commit the published text comes from (default: git HEAD). A customer
+can compare each kind's sha256 with `shasum -a 256 protocol/kinds/*.sql` at that commit.
+
+Config: the desk's ($SUPPORT_DESK_CONFIG), plus members_role (default: the realm prefix's
+member role, __<prefix>_member, from a member named <prefix>_<handle>).
+"""
+import hashlib, json, os, re, subprocess, sys
+
+here = os.path.dirname(os.path.abspath(__file__))
+root = os.path.dirname(here)
+sys.path.insert(0, here)
+from importlib.machinery import SourceFileLoader  # noqa: E402
+desk = SourceFileLoader("desk", os.path.join(here, "desk")).load_module()
+
+
+def statements(path):
+    """(phase, statement) pairs: '-- phase: X' lines set the phase; statements end with ';'."""
+    phase, out, buf = "", [], []
+    for line in open(path).read().splitlines():
+        m = re.match(r"--\s*phase:\s*(\S+)", line)
+        if m:
+            phase = m.group(1)
+            continue
+        if line.startswith("--") and not buf:
+            continue
+        buf.append(line)
+        if line.rstrip().endswith(";"):
+            out.append((phase, "\n".join(buf).strip().rstrip(";")))
+            buf = []
+    if "\n".join(buf).strip():
+        out.append((phase, "\n".join(buf).strip()))
+    return out
+
+
+def guide(path):
+    sections, name, buf = [], None, []
+    for line in open(path).read().splitlines():
+        if line.startswith("## "):
+            if name:
+                sections.append((name, "\n".join(buf).strip()))
+            name, buf = line[3:].strip(), []
+        elif name:
+            buf.append(line)
+    if name:
+        sections.append((name, "\n".join(buf).strip()))
+    return sections
+
+
+def kinds(dirpath):
+    out = []
+    for f in sorted(os.listdir(dirpath)):
+        if not f.endswith(".sql"):
+            continue
+        sql = open(os.path.join(dirpath, f)).read()
+        head = dict(re.findall(r"^--\s*(kind|args|sends):\s*(.*)$", sql, re.M))
+        out.append({"kind": head["kind"], "args": head.get("args", ""), "sends": head.get("sends", ""), "sql": sql})
+    return out
+
+
+def main():
+    argv = sys.argv[1:]
+    if argv and argv[0] in ("-h", "--help"):
+        print(__doc__)
+        return
+    cfg = desk.load_config()
+    d = desk.Desk(cfg)
+    S = d.member
+    members = cfg.get("members_role") or "__" + S.split("_", 1)[0] + "_member"
+    commit = desk.opt(argv, "--commit") or subprocess.run(
+        ["git", "-C", root, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    prefix = S.split("_", 1)[0]
+    sub = lambda s: (s.replace("<support>", S).replace("<members>", members)
+                     .replace("<prefix>", prefix).replace("<realm>", d.url))
+
+    for _, stmt in statements(os.path.join(here, "rooms.sql")):
+        d.q(sub(stmt), fmt="TSV")
+
+    ks = kinds(os.path.join(root, "protocol", "kinds"))
+    sections = [(n, sub(b)) for n, b in guide(os.path.join(root, "protocol", "GUIDE.md"))]
+    digest = "\n".join(f"{k['kind']} {hashlib.sha256(k['sql'].encode()).hexdigest()}" for k in ks)
+    sections.append(("version", f"Published from github.com/agent-realm/support-agency at commit {commit}. "
+                     "The sha256 of each kind's sql, which must equal shasum -a 256 protocol/kinds/<kind>.sql "
+                     "at that commit, and SELECT kind, lower(hex(SHA256(sql))) FROM <house>.support_kinds "
+                     "ORDER BY kind in your own copy:\n" + digest))
+    stmts = []
+    for f in ("enroll.sql", "local-account.sql"):
+        steps = {}
+        for phase, stmt in statements(os.path.join(root, "protocol", f)):
+            steps[phase] = steps.get(phase, 0) + 1
+            stmts.append({"phase": phase, "step": steps[phase], "stmt": sub(stmt)})
+
+    for table, data in (("protocol", [{"step": i + 1, "section": n, "body": b} for i, (n, b) in enumerate(sections)]),
+                        ("kinds", ks), ("statements", stmts)):
+        d.q(f"TRUNCATE TABLE {S}.{table}", fmt="TSV")
+        d.q(f"INSERT INTO {S}.{table} FORMAT JSONEachRow\n" + "\n".join(json.dumps(r) for r in data), fmt="TSV")
+        print(f"{S}.{table}: {len(data)} rows")
+    print(f"open to {members}: protocol, kinds, statements, heartbeat; commit {commit}")
+
+
+if __name__ == "__main__":
+    main()

@@ -81,3 +81,8 @@ admin-side canary checks and to drop the test members. Recorded runs and drills 
 | `test/` | `lib.sh`, `members.sh`, `e2e.sh` |
 | `drills/` | recorded runs |
 | `TERMINOLOGY.md` | where the vocabulary comes from |
+| `LICENSE`, `NOTICE` | Apache License 2.0, and the copyright notice |
+
+## License
+
+Apache License 2.0. See `LICENSE` and `NOTICE`.
